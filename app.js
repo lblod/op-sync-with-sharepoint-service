@@ -1,9 +1,9 @@
 import { app, errorHandler } from 'mu';
 import bodyParser from 'body-parser';
-import { getTypes, getSharepointId } from './queries';
 import flatten from 'lodash.flatten';
-// TODO move config file to the app
-const CONFIG = require('./mappings.json')
+import { getQueryParams } from './lib/delta-processing';
+
+const CONFIG = require('/config/mappings.json')
 
 // TODO - Log an error + send an email each time a syncing fails
 // See https://github.com/lblod/delta-consumer-file-sync-submissions/blob/master/lib/error.js
@@ -29,18 +29,7 @@ app.post('/delta', async function (req, res) {
     const inserts = flatten(delta.map(changeSet => changeSet.inserts));
 
     if (deletes.length || inserts.length) {
-
-      const deletesQueryParams = await getQueryParams(deletes);
-      const insertsQueryParams = await getQueryParams(inserts);
-
-      console.log('deletesQueryParams', deletesQueryParams);
-      console.log('insertsQueryParams', insertsQueryParams);
-
-      // To connect to Sharepoint, if we have this registration https://www.leonarmston.com/2022/01/pnp-powershell-csom-now-works-with-sharepoint-sites-selected-permission-using-azure-ad-app/,
-      // we can try using https://pnp.github.io/pnpjs/authentication/server-nodejs/#call-sharepoint
-      // Update : broken page, use https://web.archive.org/web/20210118233746/https://pnp.github.io/pnpjs/authentication/server-nodejs/
-
-      // TODO - An insert can be entirely new data and not an update. See if has to be handled differently through the queries
+      updateSharepointList(deletes, inserts);
     } else {
       console.log("No deletes or inserts in the deltas, skipping.");
     }
@@ -53,74 +42,23 @@ app.post('/delta', async function (req, res) {
 });
 
 /**
- * Gets the query params from the received deltas.
- * A query param object contains the id of the object in the Sharepoint, the value
- * that is updated and the fields it should be updated to.
+ * Update the sharepoint list linked to some deltas.
+ * The order is important : we should first process the deletes and only once it's done the inserts.
  *
  * @param {Array} deltas The deltas from which to deduce the query params
- * @returns {Array} For each delta, the associated query params
  */
-async function getQueryParams(deltas) {
-  const queryParams = [];
-  if (deltas.length) {
-    for (let i = 0; i < deltas.length; i++) {
-      const enrichedDelta = await enrichDelta(deltas[i]);
+async function updateSharepointList(deletes, inserts) {
+  const deletesQueryParams = await getQueryParams(deletes);
+  const insertsQueryParams = await getQueryParams(inserts);
 
-      if (enrichedDelta.relevantConfigs.length) {
-        const prefix = enrichedDelta.delta.predicate.value;
-        const sharepointFields = enrichedDelta.relevantConfigs
-          .map(config => {
-            return config.mappings.find(mapping => mapping.op == prefix);
-          })
-          .map(config => config.sl);
+  console.log('deletesQueryParams', deletesQueryParams);
+  console.log('insertsQueryParams', insertsQueryParams);
 
-        const sharepointId = await getSharepointId(enrichedDelta);
-        const value = enrichedDelta.delta.object.value;
-        const queryParam = {
-          sharepointId,
-          value,
-          sharepointFields
-        };
-        queryParams.push(queryParam);
-      }
-    }
-  }
+  // To connect to Sharepoint, if we have this registration https://www.leonarmston.com/2022/01/pnp-powershell-csom-now-works-with-sharepoint-sites-selected-permission-using-azure-ad-app/,
+  // we can try using https://pnp.github.io/pnpjs/authentication/server-nodejs/#call-sharepoint
+  // Update : broken page, use https://web.archive.org/web/20210118233746/https://pnp.github.io/pnpjs/authentication/server-nodejs/
 
-  return queryParams;
-}
-
-/**
- * Enriches the deltas with useful info to get the query params
- * 
- * @param {Object} delta The delta to enrich
- * @returns {Object} The delta enriched with the types of its subject and configuration related to it
- */
-async function enrichDelta(delta) {
-  const enrichedDeltaWithTypes = await enrichDeltaWithTypes(delta);
-  const finalEnrichedDelta = enrichDeltaWithRelevantConfigs(enrichedDeltaWithTypes);
-  return finalEnrichedDelta;
-}
-
-async function enrichDeltaWithTypes(delta) {
-  return {
-    delta: delta,
-    types: await getTypes(delta.subject.value)
-  };
-}
-
-function enrichDeltaWithRelevantConfigs(delta) {
-  const relevantTypes = delta.types.filter(type => CONFIG.objects.map(t => t.type).includes(type));
-  if (relevantTypes) {
-    let relevantConfigs = [];
-    relevantTypes.forEach(type => {
-      const relevantConfig = CONFIG.objects.find(object => object.type == type)
-      relevantConfigs.push(relevantConfig);
-    });
-    delta.relevantConfigs = relevantConfigs;
-  } else {
-    delta.relevantConfigs = [];
-  }
-  return delta;
+  // TODO - An insert can be entirely new data and not an update. See if has to be handled differently through the queries
 }
 
 // We were supposed to log in via Azure AD, but in the end not sure we'll do it like that.
