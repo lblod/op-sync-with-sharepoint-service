@@ -20,6 +20,9 @@
     "axios": "^0.25.0",
     "isomorphic-fetch": "^3.0.0",
     "lodash.flatten": "^4.4.0",
-    "request-promise": "^4.2.6"
+    "request-promise": "^4.2.6",
+    "sharepointplus": "^6.1.5",
+    "sp-request": "^3.0.0",
+    "xmldom": "^0.6.0"
   }
 }
