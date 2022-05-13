@@ -17,3 +17,7 @@ export const LIST = process.env.LIST;
 if(!process.env.SITE)
   throw `Expected 'SITE' to be provided.`;
 export const SITE = process.env.SITE;
+
+if(!process.env.SHAREPOINT_UUID_FIELD_NAME)
+  throw `Expected 'SITE' to be provided.`;
+export const SHAREPOINT_UUID_FIELD_NAME = process.env.SHAREPOINT_UUID_FIELD_NAME;
