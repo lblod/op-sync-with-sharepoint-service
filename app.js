@@ -3,7 +3,9 @@ import bodyParser from 'body-parser';
 import flatten from 'lodash.flatten';
 import { updateSharepointList } from './lib/sharepoint-helpers';
 
-// TODO - Log an error + send an email each time a syncing fails
+// TODO - Add a retry mechanism on failed requests
+
+// TODO - Log an error + send an email each time a syncing fails (after the retries)
 // See https://github.com/lblod/delta-consumer-file-sync-submissions/blob/master/lib/error.js
 
 // TODO - Add a nighly cron job that heals the data in case something went wrong with the deltas
