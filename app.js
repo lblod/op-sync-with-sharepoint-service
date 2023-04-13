@@ -2,11 +2,10 @@ import { app, errorHandler } from 'mu';
 import bodyParser from 'body-parser';
 import flatten from 'lodash.flatten';
 import { isConfigurationValid, getListInfo, updateSharepointList } from './lib/sharepoint-helpers';
+import { createError } from './lib/error';
 
+// Check if config is valid on startup
 isConfigurationValid(getListInfo);
-
-// TODO - Log an error + send an email each time a syncing fails (after the retries)
-// See https://github.com/lblod/delta-consumer-file-sync-submissions/blob/master/lib/error.js
 
 // TODO - Add a nighly cron job that heals the data in case something went wrong with the deltas
 // It will get all the persons / organizations, flush their values in the list (only those that we'll replace)
@@ -36,6 +35,7 @@ app.post('/delta', async function (req, res) {
   }
   catch (e) {
     console.error(`General error processing delta notification ${e}`);
+    createError(e);
   }
 
   res.status(202).send();
