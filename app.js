@@ -1,9 +1,9 @@
 import { app, errorHandler } from 'mu';
 import bodyParser from 'body-parser';
 import flatten from 'lodash.flatten';
-import { updateSharepointList } from './lib/sharepoint-helpers';
+import { isConfigurationValid, getListInfo, updateSharepointList } from './lib/sharepoint-helpers';
 
-// TODO - Add a retry mechanism on failed requests
+isConfigurationValid(getListInfo);
 
 // TODO - Log an error + send an email each time a syncing fails (after the retries)
 // See https://github.com/lblod/delta-consumer-file-sync-submissions/blob/master/lib/error.js

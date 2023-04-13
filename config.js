@@ -21,3 +21,8 @@ export const SITE = process.env.SITE;
 if(!process.env.SHAREPOINT_UUID_FIELD_NAME)
   throw `Expected 'SITE' to be provided.`;
 export const SHAREPOINT_UUID_FIELD_NAME = process.env.SHAREPOINT_UUID_FIELD_NAME;
+
+// Retry mechanism
+export const RETRY =  process.env.RETRY == "false" ? false : true;
+export const RETRY_MAX_ATTEMPTS = parseInt(process.env.RETRY_MAX_ATTEMPTS || 3);
+export const RETRY_TIMEOUT_INCREMENT_FACTOR = parseFloat(process.env.RETRY_TIMEOUT_INCREMENT_FACTOR || 0.3);
