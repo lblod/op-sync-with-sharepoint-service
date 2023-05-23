@@ -1,44 +1,78 @@
-import { app, errorHandler } from 'mu';
-import bodyParser from 'body-parser';
-import flatten from 'lodash.flatten';
-import { isConfigurationValid, getListInfo, updateSharepointList } from './lib/sharepoint-helpers';
-import { createError } from './lib/error';
+import bodyParser from "body-parser";
+import { app, errorHandler } from "mu";
+import { LOG_INCOMING_DELTA, WAIT_FOR_INITIAL_SYNC } from "./env-config";
+import { executeHealingTask } from "./jobs/healing/main";
+import { executeSyncingTask } from "./jobs/syncing/main";
+import {
+  doesDeltaContainNewTaskToProcess,
+  hasInitialSyncRun,
+  isBlockingJobActive,
+} from "./jobs/utils";
+import { ProcessingQueue } from "./lib/processing-queue";
+import { storeError } from "./lib/utils";
+import { isSharepointConfigValid, getListInfo } from "./lib/sharepoint-helpers";
 
-// Check if config is valid on startup
-isConfigurationValid(getListInfo);
+const producerQueue = new ProcessingQueue();
 
-// TODO - Add a nighly cron job that heals the data in case something went wrong with the deltas
-// It will get all the persons / organizations, flush their values in the list (only those that we'll replace)
-// and push their current state from the publication graph
+// Checks if sharepoint config is valid on startup (aka if we can log in and read a list)
+isSharepointConfigValid(getListInfo);
 
-app.use(bodyParser.json({
-  type: function (req) { return /^application\/json/.test(req.get('content-type')); },
-  limit: '500mb'
-}));
+app.use(
+  bodyParser.json({
+    type: function (req) {
+      return /^application\/json/.test(req.get("content-type"));
+    },
+    limit: "500mb",
+  })
+);
 
-app.get('/', function (req, res) {
-  res.send('Hello from sync-with-sharepoint ! :)');
-});
-
-app.post('/delta', async function (req, res) {
+app.post("/delta", async function (req, res) {
   try {
-    const delta = req.body;
+    const body = req.body;
 
-    const deletes = flatten(delta.map(changeSet => changeSet.deletes));
-    const inserts = flatten(delta.map(changeSet => changeSet.inserts));
-
-    if (deletes.length || inserts.length) {
-      updateSharepointList(deletes, inserts);
-    } else {
-      console.log("No deletes or inserts in the deltas, skipping.");
+    if (LOG_INCOMING_DELTA) {
+      console.log(`Receiving delta ${JSON.stringify(body)}`);
     }
-  }
-  catch (e) {
-    console.error(`General error processing delta notification ${e}`);
-    createError(e);
-  }
 
-  res.status(202).send();
+    if (await doesDeltaContainNewTaskToProcess(body)) {
+      // From here on, the database is source of truth and the incoming delta was just a signal to start
+      console.log(`Healing process (or initialSync) will start.`);
+      console.log(
+        `There were still ${producerQueue.queue.length} jobs in the queue`
+      );
+      console.log(
+        `And the queue executing state is on ${producerQueue.executing}.`
+      );
+      producerQueue.queue = []; // Flush all remaining jobs, we don't want moving parts cf. next comment
+      producerQueue.addJob(async () => {
+        return await executeHealingTask();
+      });
+    } else if (await isBlockingJobActive()) {
+      // Durig the healing and the inital sync, we want as few as much moving parts,
+      // If a delta comes in while the healing process is busy, this might yield inconsistent/difficult to troubleshoot results.
+      // Suppose:
+      //  - healing produces statement S1 at t1: "REMOVE <foo> <bar> <baz>."
+      //  - random service produces statement S2 at t2: "ADD <foo> <bar> <baz>."
+      //  - Suppose S1 and S2 are about the same resource and S2 gets processed before S2 (Because, e.g. healing takes more time)
+      //  This would result in out of sync data between our triplestore and the sharepoint list, which affects the clients information too.
+      //  In our case, this would be fixed by the next healing though.
+      console.info("Blocking jobs are active, skipping incoming deltas");
+    } else if (WAIT_FOR_INITIAL_SYNC && !(await hasInitialSyncRun())) {
+      // To sync data consistently and correctly, an initial sync needs to have run.
+      // It ensures we have a common fixed value that we can map on (triplestore/sharepoint list) for each resource that needs to be synced.
+      // Note: WAIT_FOR_INITIAL_SYNC is mainly meant for debugging purposes, defaults to true
+      console.info("Initial sync did not run yet, skipping incoming deltas");
+    } else {
+      // Normal operation mode: syncing incoming data with configured sharepoint list
+      // Put in a queue, because we want to make sure to have them ordered.
+      producerQueue.addJob(async () => await executeSyncingTask(body));
+    }
+    res.status(202).send();
+  } catch (error) {
+    console.error(error);
+    await storeError(error);
+    res.status(500).send();
+  }
 });
 
 app.use(errorHandler);
