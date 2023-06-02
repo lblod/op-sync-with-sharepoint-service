@@ -28,10 +28,14 @@ const producerQueue = new ProcessingQueue();
 isSharepointConfigValid(getListInfo);
 
 // The services takes a while to start and can miss the background job initiating the initial sync
-if (isInitialSyncOrHealingJobScheduled()) {
-  console.log('Executing initial sync or healing job created before startup');
-  startInitialSyncOrHealing();
-}
+isInitialSyncOrHealingJobScheduled().then(result => {
+  if (result) {
+    console.log('Executing initial sync or healing job created before startup');
+    startInitialSyncOrHealing();
+  } else {
+    console.log('No initial sync or healing job pending');
+  }
+});
 
 app.post("/delta", async function (req, res) {
   try {

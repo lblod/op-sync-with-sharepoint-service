@@ -1,3 +1,7 @@
+import { loadConfiguration } from "./lib/utils";
+
+export const CONFIG = loadConfiguration();
+
 export const LOG_INCOMING_DELTA = process.env.LOG_INCOMING_DELTA || false;
 
 export const PREFIXES = `

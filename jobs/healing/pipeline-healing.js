@@ -1,13 +1,13 @@
 import { querySudo as query } from "@lblod/mu-auth-sudo";
 import { sparqlEscapeUri } from "mu";
 import {
+  CONFIG,
   MU_AUTH_ENDPOINT,
   USE_VIRTUOSO_FOR_EXPENSIVE_SELECTS,
   VIRTUOSO_ENDPOINT,
   SHAREPOINT_UUID_FIELD_NAME,
   PREFIXES,
 } from "../../env-config";
-import { loadConfiguration } from "../../lib/utils";
 import {
   getAuthenticated,
   querySharepointList,
@@ -15,8 +15,6 @@ import {
   spUpdateWithRetry,
   spSetReadOnlyWithRetry,
 } from "../../lib/sharepoint-helpers";
-
-const CONFIG = loadConfiguration();
 
 export async function runHealingTask() {
   try {
@@ -176,7 +174,7 @@ export async function runHealingTask() {
 async function getBesturenMatchingInfo(pathToMatchingUuid, predicatePathArray) {
   // We limit the source graphs to avoid also including producers graphs that could not be up-to-date,
   // depending on when the healing runs, as well as other graphs is need be
-  const graphsFilter = constructGraphsFilter();
+  const graphsFilter = constructGraphsFilter('graph');
   const predicatePath = constructPredicatePath(predicatePathArray);
 
   const queryString = `
@@ -230,22 +228,15 @@ async function getSourceData(configObject) {
 async function getScopedSourceTriples(configObject, mapping) {
   // We limit the source graphs to avoid also including producers graphs that could not be up-to-date,
   // depending on when the healing runs, as well as other graphs is need be
-  const graphsFilter = constructGraphsFilter();
-  const predicatePath = constructPredicatePath(mapping.op);
+  const pathInAndOutOfSourceGraphs = constructPathInAndOutOfSourceGraphs(mapping.op, configObject);
 
   // We highly rely on the configuration for this. The variables ?s and ?matchingUuid are used in the config
   // and reused in the query.
   const selectFromDatabase = `
     SELECT DISTINCT ?s ?o ?matchingUuid WHERE {
-      GRAPH ?graph {
-        ?s a ${sparqlEscapeUri(configObject.type)}.
-      }
-
-      ?s ${predicatePath} ?o .
+      ${pathInAndOutOfSourceGraphs}
 
       ${configObject.pathToMatchingUuid}
-
-      ${graphsFilter}
     }
   `;
 
@@ -356,11 +347,11 @@ function stringifySharepointData(res, mapping) {
   )} ${res.getAttribute(mapping.sl)}`;
 }
 
-function constructGraphsFilter() {
+function constructGraphsFilter(graphName) {
   const escapedSourceGraphs = CONFIG.sourceGraphs.map((sourceGraph) =>
     sparqlEscapeUri(sourceGraph)
   );
-  const graphsFilterStr = `FILTER(?graph IN ( ${escapedSourceGraphs.join(
+  const graphsFilterStr = `FILTER(?${graphName} IN ( ${escapedSourceGraphs.join(
     ", "
   )}))`;
   return graphsFilterStr;
@@ -376,4 +367,70 @@ function constructPredicatePath(arrayPath) {
   });
   stringifiedPath = stringifiedPath.join("/");
   return stringifiedPath;
+}
+
+/**
+ * We need to get only the values that are in the predefined source graphs.
+ * But sometime the paths spead accross multiple graphs, so we split the path
+ * to be able to force the ?value to be in our source graphs.
+ *
+ * Examples:
+ *   1. Only one value in the path ["http://www.w3.org/2004/02/skos/core#prefLabel"]
+ *      Output will be:
+ *        ```
+ *        ?s a <http://data.vlaanderen.be/ns/besluit#Bestuurseenheid> .
+ *        GRAPH ?g {
+ *          ?s <http://www.w3.org/2004/02/skos/core#prefLabel> ?o .
+ *        }
+ *        ```
+ *   2. More than one value in the path
+ *      ["http://www.w3.org/ns/org#classification", "http://www.w3.org/2004/02/skos/core#prefLabel"]
+ *      We only set the latest part of the path in the graph, the rest could be spread over multiple graphs
+ *      Output will be:
+ *        ```
+ *        GRAPH ?g {
+ *          ?s a <http://data.vlaanderen.be/ns/besluit#Bestuurseenheid> .
+ *        }
+ *        ?s <http://www.w3.org/ns/org#classification> ?resource .
+ *        GRAPH ?graph {
+ *          ?resource <http://www.w3.org/2004/02/skos/core#prefLabel> ?o .
+ *        }
+ *        ```
+ */
+function constructPathInAndOutOfSourceGraphs(path, configObject) {
+  // Deep copy of the path to avoid modifying the config object
+  const clonedPath = JSON.parse(JSON.stringify(path))
+  const pathPortionInSourceGraphs = constructPredicatePath([clonedPath.pop()]);
+  const pathPotentiallyOutsideSourceGraphs = constructPredicatePath(clonedPath);
+
+  const graphsFilterG = constructGraphsFilter('g');
+  const graphsFilterH = constructGraphsFilter('h');
+
+  let pathInAndOutOfSourceGraphs;
+  if (pathPotentiallyOutsideSourceGraphs.length) {
+    pathInAndOutOfSourceGraphs = `
+      GRAPH ?g {
+        ?s a ${sparqlEscapeUri(configObject.type)} .
+      }
+
+      ?s ${pathPotentiallyOutsideSourceGraphs} ?resource .
+
+      GRAPH ?h {
+        ?resource ${pathPortionInSourceGraphs} ?o .
+      }
+
+      ${graphsFilterG}
+      ${graphsFilterH}
+    `;
+  } else {
+    pathInAndOutOfSourceGraphs = `
+      GRAPH ?g {
+        ?s a ${sparqlEscapeUri(configObject.type)} ;
+          ${pathPortionInSourceGraphs} ?o .
+      }
+
+      ${graphsFilterG}
+    `;
+  }
+  return pathInAndOutOfSourceGraphs;
 }
