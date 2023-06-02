@@ -10,7 +10,7 @@ export async function executeSyncingTask(delta) {
     const inserts = flatten(delta.map(changeSet => changeSet.inserts));
 
     if (deletes.length || inserts.length) {
-      updateSharepointList(deletes, inserts);
+      await updateSharepointList(deletes, inserts);
     } else {
       console.log("No deletes or inserts in the deltas, skipping.");
     }
