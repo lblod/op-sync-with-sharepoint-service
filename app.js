@@ -7,15 +7,11 @@ import {
   doesDeltaContainNewTaskToProcess,
   hasInitialSyncRun,
   isBlockingJobActive,
+  isInitialSyncOrHealingJobScheduled,
 } from "./jobs/utils";
 import { ProcessingQueue } from "./lib/processing-queue";
 import { storeError } from "./lib/utils";
 import { isSharepointConfigValid, getListInfo } from "./lib/sharepoint-helpers";
-
-const producerQueue = new ProcessingQueue();
-
-// Checks if sharepoint config is valid on startup (aka if we can log in and read a list)
-isSharepointConfigValid(getListInfo);
 
 app.use(
   bodyParser.json({
@@ -26,6 +22,17 @@ app.use(
   })
 );
 
+const producerQueue = new ProcessingQueue();
+
+// Checks if sharepoint config is valid on startup (aka if we can log in and read a list)
+isSharepointConfigValid(getListInfo);
+
+// The services takes a while to start and can miss the background job initiating the initial sync
+if (isInitialSyncOrHealingJobScheduled()) {
+  console.log('Executing initial sync or healing job created before startup');
+  startInitialSyncOrHealing();
+}
+
 app.post("/delta", async function (req, res) {
   try {
     const body = req.body;
@@ -35,18 +42,7 @@ app.post("/delta", async function (req, res) {
     }
 
     if (await doesDeltaContainNewTaskToProcess(body)) {
-      // From here on, the database is source of truth and the incoming delta was just a signal to start
-      console.log(`Healing process (or initialSync) will start.`);
-      console.log(
-        `There were still ${producerQueue.queue.length} jobs in the queue`
-      );
-      console.log(
-        `And the queue executing state is on ${producerQueue.executing}.`
-      );
-      producerQueue.queue = []; // Flush all remaining jobs, we don't want moving parts cf. next comment
-      producerQueue.addJob(async () => {
-        return await executeHealingTask();
-      });
+      startInitialSyncOrHealing();
     } else if (await isBlockingJobActive()) {
       // Durig the healing and the inital sync, we want as few as much moving parts,
       // If a delta comes in while the healing process is busy, this might yield inconsistent/difficult to troubleshoot results.
@@ -74,5 +70,20 @@ app.post("/delta", async function (req, res) {
     res.status(500).send();
   }
 });
+
+function startInitialSyncOrHealing() {
+  // From here on, the database is source of truth and the incoming delta was just a signal to start
+  console.log(`Healing process (or initial sync) will start.`);
+  console.log(
+    `There were still ${producerQueue.queue.length} jobs in the queue`
+  );
+  console.log(
+    `And the queue executing state is on ${producerQueue.executing}.`
+  );
+  producerQueue.queue = []; // Flush all remaining jobs, we don't want moving parts cf. next comment
+  producerQueue.addJob(async () => {
+    return await executeHealingTask();
+  });
+}
 
 app.use(errorHandler);

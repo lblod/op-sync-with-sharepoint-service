@@ -53,7 +53,6 @@ export async function executeHealingTask() {
   }
 }
 
-// TODO: refactor this to a more generic task filter in lib/task.js
 async function getTaskUri(jobOperationUri, taskOperationUri, statusUri) {
   const queryString = `
     ${PREFIXES}

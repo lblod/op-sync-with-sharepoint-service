@@ -97,3 +97,32 @@ async function isNewTaskOfInterest(taskUri) {
   const result = await query(queryString);
   return result.results.bindings.length > 0;
 }
+
+export async function isInitialSyncOrHealingJobScheduled() {
+  const queryString = `
+    ${PREFIXES}
+
+    SELECT DISTINCT ?job ?task WHERE {
+      GRAPH ?g {
+        ?job a ${sparqlEscapeUri(JOB_TYPE)};
+          task:operation ?jobOperation.
+
+        ?task dct:isPartOf ?job;
+          a ${sparqlEscapeUri(TASK_TYPE)};
+          task:operation ?taskOperation;
+          adms:status ${sparqlEscapeUri(STATUS_SCHEDULED)}.
+      }
+      FILTER( ?taskOperation IN (
+        ${sparqlEscapeUri(INITIAL_SYNC_TASK_OPERATION)},
+        ${sparqlEscapeUri(HEALING_TASK_OPERATION)}
+      ))
+      FILTER( ?jobOperation IN (
+        ${sparqlEscapeUri(INITIAL_SYNC_JOB_OPERATION)},
+        ${sparqlEscapeUri(HEALING_JOB_OPERATION)}
+      ))
+    }
+  `;
+
+  const result = await query(queryString);
+  return result.results.bindings.length > 0;
+}

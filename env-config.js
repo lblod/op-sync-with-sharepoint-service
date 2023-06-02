@@ -14,7 +14,7 @@ export const PREFIXES = `
   PREFIX dbpedia: <http://dbpedia.org/resource/>
   PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
   PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-  PREFIX generiek: <<https://data.vlaanderen.be/ns/generiek#>
+  PREFIX generiek: <https://data.vlaanderen.be/ns/generiek#>
 `;
 
 export const ERROR_URI_PREFIX = "http://redpencil.data.gift/id/jobs/error/";
@@ -41,14 +41,12 @@ export const ERROR_CREATOR_URI =
   "http://lblod.data.gift/services/op-sync-with-sharepoint";
 
 //task operation of interest
-export const HEALING_TASK_OPERATION =
-  "http://redpencil.data.gift/id/jobs/concept/TaskOperation/deltas/healing/healSharepoint";
 export const INITIAL_SYNC_TASK_OPERATION =
-  "http://redpencil.data.gift/id/jobs/concept/TaskOperation/deltas/initialSyncWithSharepoint";
+  "http://redpencil.data.gift/id/jobs/concept/TaskOperation/sp-sync/initialSyncing";
+export const HEALING_TASK_OPERATION =
+  "http://redpencil.data.gift/id/jobs/concept/TaskOperation/sp-sync/healing";
 
 export const QUEUE_POLL_INTERVAL = process.env.QUEUE_POLL_INTERVAL || 60000;
-
-export const SOURCE_GRAPHS = process.env.SOURCE_GRAPHS.split(",");
 
 // Mainly for debugging purposes
 export const WAIT_FOR_INITIAL_SYNC =
@@ -71,9 +69,9 @@ export const HEALING_JOB_OPERATION = process.env.HEALING_JOB_OPERATION;
 export const USE_VIRTUOSO_FOR_EXPENSIVE_SELECTS =
   process.env.USE_VIRTUOSO_FOR_EXPENSIVE_SELECTS == "true" ? true : false;
 export const VIRTUOSO_ENDPOINT =
-  process.VIRTUOSO_ENDPOINT || "http://virtuoso:8890/sparql";
+  process.VIRTUOSO_ENDPOINT || "http://triplestore:8890/sparql";
 export const MU_AUTH_ENDPOINT =
-  process.MU_AUTH_ENDPOINT || "http://database:8890/sparql";
+  process.MU_AUTH_ENDPOINT || "http://db:8890/sparql";
 
 /*
  * END EXPERIMENTAL FEATURES
