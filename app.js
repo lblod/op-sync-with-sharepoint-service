@@ -22,7 +22,7 @@ app.use(
   })
 );
 
-const producerQueue = new ProcessingQueue();
+const processingQueue = new ProcessingQueue();
 
 // Checks if sharepoint config is valid on startup (aka if we can log in and read a list)
 isSharepointConfigValid(getListInfo);
@@ -65,7 +65,7 @@ app.post("/delta", async function (req, res) {
     } else {
       // Normal operation mode: syncing incoming data with configured sharepoint list
       // Put in a queue, because we want to make sure to have them ordered.
-      producerQueue.addJob(async () => await executeSyncingTask(body));
+      processingQueue.addJob(async () => await executeSyncingTask(body));
     }
     res.status(202).send();
   } catch (error) {
@@ -79,13 +79,13 @@ function startInitialSyncOrHealing() {
   // From here on, the database is source of truth and the incoming delta was just a signal to start
   console.log(`Healing process (or initial sync) will start.`);
   console.log(
-    `There were still ${producerQueue.queue.length} jobs in the queue`
+    `There were still ${processingQueue.queue.length} jobs in the queue`
   );
   console.log(
-    `And the queue executing state is on ${producerQueue.executing}.`
+    `And the queue executing state is on ${processingQueue.executing}.`
   );
-  producerQueue.queue = []; // Flush all remaining jobs, we don't want moving parts cf. next comment
-  producerQueue.addJob(async () => {
+  processingQueue.queue = []; // Flush all remaining jobs, we don't want moving parts cf. next comment
+  processingQueue.addJob(async () => {
     return await executeHealingTask();
   });
 }
