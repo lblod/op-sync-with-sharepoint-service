@@ -15,25 +15,31 @@ import {
   spUpdateWithRetry,
   spSetReadOnlyWithRetry,
 } from "../../lib/sharepoint-helpers";
+import {
+  constructGraphsFilter,
+  constructPredicatePath,
+  constructPathInAndOutOfSourceGraphs,
+} from "../../lib/utils";
 
+/*
+  When initial syncing or healing, we want to match data already present in the sharepoint list to
+  data from our database. But in the case of initial syncing or if admin units are manually added
+  afterwards (for ex. when onboarding new types of admin units), the matchingUuid we normally use
+  is not yet uploaded to the list. We need an other way of doing the matching in the meantime.
+  To do this, we'll agree on a matching field to map data of the list to data of our db and
+  to upload the matching uuid used in the configuration. It's this uuid that will then be used
+  to sync data.
+  We do it in two steps because the initial mapping field could afterwards be updated in OP and
+  the matching would be broken. It's why we prefer relying on a fixed ID value as soon as we have it uploaded.
+*/
 export async function runHealingTask() {
   try {
     const sp = getAuthenticated();
-
     const started = new Date();
-
     console.log(`starting at ${started}`);
 
-    // When initial syncing or healing, we want to match data already present in the sharepoint list to
-    // data from our database. But in the case of initial syncing or if admin units are manually added
-    // afterwards (for ex. when onboarding new types of admin units), the matchingUuid we normally use
-    // is not yet uploaded to the list. We need an other way of doing the matching in the meantime.
-    // To do this, we'll agree on a matching field to map data of the list to data of our db and
-    // to upload the matching uuid used in the configuration. It's this uuid that will then be used
-    // to sync data.
-    // We do it like that, in two steps, because the initial mapping field could afterwards be updated in OP,
-    // and the matching would be broken. It's why we prefer relying on a truly fixed value for "routine" matching
-
+    // FIRST STEP - BEGINNING
+    // Uploading fixed ID based on initial matching field when fixed ID not found
     const initialMatchingObject = CONFIG.objects.find((object) =>
       object.mappings.find((mapping) => mapping.isInitialMatchingMapping)
     );
@@ -41,8 +47,8 @@ export async function runHealingTask() {
       (mapping) => mapping.isInitialMatchingMapping
     );
 
-    // 1. Get all matching info in OP
-    const besturenMatchingInfo = await getBesturenMatchingInfo(
+    // 1. Get all intiial matching info in OP
+    const initialMatchingInfo = await getInitialMatchingInfo(
       initialMatchingObject.pathToMatchingUuid,
       initialMatchingMapping.op
     );
@@ -58,7 +64,7 @@ export async function runHealingTask() {
 
     missingMatchingUuidInSharepoint.forEach((res) => {
       const matchingValue = res.getAttribute(initialMatchingMapping.sl);
-      const opMatch = besturenMatchingInfo.find(
+      const opMatch = initialMatchingInfo.find(
         (info) => info.matchingValue == matchingValue
       );
 
@@ -85,6 +91,11 @@ export async function runHealingTask() {
       await spSetReadOnlyWithRetry(sp, SHAREPOINT_UUID_FIELD_NAME, true);
     }
     console.log("...Done");
+
+    // FIRST STEP - END
+
+    // SECOND STEP - BEGINNING
+    // Updating data of the sharepoint list, mapping on fixed ID
 
     let accumulatedDiffs = { inserts: [], deletes: [] };
 
@@ -123,7 +134,6 @@ export async function runHealingTask() {
 
     // 4. Sync that diff to the sharepoint list : deletes & inserts
 
-    // Deletes: it should be rather easy: insert with value being '' for each delete line
     let deletesQueryParams = [];
     for (const del of accumulatedDiffs.deletes) {
       // If the sharepoint value is already empty and we still got the instruction to delete it
@@ -146,7 +156,6 @@ export async function runHealingTask() {
       console.log("...done");
     }
 
-    // Inserts: for existing lines -> regular add, for new lines -> new line creation
     let insertsQueryParams = [];
     for (const insert of accumulatedDiffs.inserts) {
       const queryParam = {
@@ -171,10 +180,17 @@ export async function runHealingTask() {
   }
 }
 
-async function getBesturenMatchingInfo(pathToMatchingUuid, predicatePathArray) {
+/**
+ * Queries the triplestore to get all the fixed ID as well as initial mapping values
+ *
+ * @param {String} pathToMatchingUuid
+ * @param {Array} predicatePathArray
+ * @returns matching fixed IDs and initial mapping values
+ */
+async function getInitialMatchingInfo(pathToMatchingUuid, predicatePathArray) {
   // We limit the source graphs to avoid also including producers graphs that could not be up-to-date,
   // depending on when the healing runs, as well as other graphs is need be
-  const graphsFilter = constructGraphsFilter('graph');
+  const graphsFilter = constructGraphsFilter("graph");
   const predicatePath = constructPredicatePath(predicatePathArray);
 
   const queryString = `
@@ -228,13 +244,24 @@ async function getSourceData(configObject) {
 async function getScopedSourceTriples(configObject, mapping) {
   // We limit the source graphs to avoid also including producers graphs that could not be up-to-date,
   // depending on when the healing runs, as well as other graphs is need be
-  const pathInAndOutOfSourceGraphs = constructPathInAndOutOfSourceGraphs(mapping.op, configObject);
+  const graphsFilterG = constructGraphsFilter("g");
+  const graphsFilterH = constructGraphsFilter("h");
+  const pathInAndOutOfSourceGraphs = constructPathInAndOutOfSourceGraphs(
+    mapping.op,
+    "h"
+  );
 
   // We highly rely on the configuration for this. The variables ?s and ?matchingUuid are used in the config
   // and reused in the query.
   const selectFromDatabase = `
     SELECT DISTINCT ?s ?o ?matchingUuid WHERE {
+      GRAPH ?g {
+        ?s a ${sparqlEscapeUri(configObject.type)} .
+      }
+      ${graphsFilterG}
+
       ${pathInAndOutOfSourceGraphs}
+      ${graphsFilterH}
 
       ${configObject.pathToMatchingUuid}
     }
@@ -282,26 +309,33 @@ async function getSharepointData(configObject, sp) {
   return sharepointData;
 }
 
-function diffTriplesData(target, source) {
+/**
+ * Makes a diff of two datasets. Both datasets are formatted in a way that allows us to compare them easily:
+ * `sharepointFieldName matchingUuidValue fieldValue`
+ * @param {Array} source Triples from our database
+ * @param {Array} target Data from the sharepoint
+ * @returns Set of deletes and inserts to execute on the sharepoint list to sync it with our triplestore
+ */
+function diffTriplesData(source, target) {
   // Note: this only works correctly if triples have same lexical notation.
   // So think about it, when copy pasting :-)
   const diff = { inserts: [], deletes: [] };
-
-  const targetHash = target.reduce((acc, curr) => {
-    acc[curr.stringifiedSharepointData] = curr;
-    return acc;
-  }, {});
 
   const sourceHash = source.reduce((acc, curr) => {
     acc[curr.stringifiedSharepointData] = curr;
     return acc;
   }, {});
 
-  diff.inserts = target.filter(
-    (data) => !sourceHash[data.stringifiedSharepointData]
-  );
-  diff.deletes = source.filter(
+  const targetHash = target.reduce((acc, curr) => {
+    acc[curr.stringifiedSharepointData] = curr;
+    return acc;
+  }, {});
+
+  diff.inserts = source.filter(
     (data) => !targetHash[data.stringifiedSharepointData]
+  );
+  diff.deletes = target.filter(
+    (data) => !sourceHash[data.stringifiedSharepointData]
   );
 
   return diff;
@@ -345,92 +379,4 @@ function stringifySharepointData(res, mapping) {
   return `${mapping.sl} ${res.getAttribute(
     SHAREPOINT_UUID_FIELD_NAME
   )} ${res.getAttribute(mapping.sl)}`;
-}
-
-function constructGraphsFilter(graphName) {
-  const escapedSourceGraphs = CONFIG.sourceGraphs.map((sourceGraph) =>
-    sparqlEscapeUri(sourceGraph)
-  );
-  const graphsFilterStr = `FILTER(?${graphName} IN ( ${escapedSourceGraphs.join(
-    ", "
-  )}))`;
-  return graphsFilterStr;
-}
-
-function constructPredicatePath(arrayPath) {
-  let stringifiedPath = arrayPath.map((predicate) => {
-    if (predicate[0] == "^") {
-      return `^${sparqlEscapeUri(predicate.slice(1))}`;
-    } else {
-      return `${sparqlEscapeUri(predicate)}`;
-    }
-  });
-  stringifiedPath = stringifiedPath.join("/");
-  return stringifiedPath;
-}
-
-/**
- * We need to get only the values that are in the predefined source graphs.
- * But sometime the paths spead accross multiple graphs, so we split the path
- * to be able to force the ?value to be in our source graphs.
- *
- * Examples:
- *   1. Only one value in the path ["http://www.w3.org/2004/02/skos/core#prefLabel"]
- *      Output will be:
- *        ```
- *        ?s a <http://data.vlaanderen.be/ns/besluit#Bestuurseenheid> .
- *        GRAPH ?g {
- *          ?s <http://www.w3.org/2004/02/skos/core#prefLabel> ?o .
- *        }
- *        ```
- *   2. More than one value in the path
- *      ["http://www.w3.org/ns/org#classification", "http://www.w3.org/2004/02/skos/core#prefLabel"]
- *      We only set the latest part of the path in the graph, the rest could be spread over multiple graphs
- *      Output will be:
- *        ```
- *        GRAPH ?g {
- *          ?s a <http://data.vlaanderen.be/ns/besluit#Bestuurseenheid> .
- *        }
- *        ?s <http://www.w3.org/ns/org#classification> ?resource .
- *        GRAPH ?graph {
- *          ?resource <http://www.w3.org/2004/02/skos/core#prefLabel> ?o .
- *        }
- *        ```
- */
-function constructPathInAndOutOfSourceGraphs(path, configObject) {
-  // Deep copy of the path to avoid modifying the config object
-  const clonedPath = JSON.parse(JSON.stringify(path))
-  const pathPortionInSourceGraphs = constructPredicatePath([clonedPath.pop()]);
-  const pathPotentiallyOutsideSourceGraphs = constructPredicatePath(clonedPath);
-
-  const graphsFilterG = constructGraphsFilter('g');
-  const graphsFilterH = constructGraphsFilter('h');
-
-  let pathInAndOutOfSourceGraphs;
-  if (pathPotentiallyOutsideSourceGraphs.length) {
-    pathInAndOutOfSourceGraphs = `
-      GRAPH ?g {
-        ?s a ${sparqlEscapeUri(configObject.type)} .
-      }
-
-      ?s ${pathPotentiallyOutsideSourceGraphs} ?resource .
-
-      GRAPH ?h {
-        ?resource ${pathPortionInSourceGraphs} ?o .
-      }
-
-      ${graphsFilterG}
-      ${graphsFilterH}
-    `;
-  } else {
-    pathInAndOutOfSourceGraphs = `
-      GRAPH ?g {
-        ?s a ${sparqlEscapeUri(configObject.type)} ;
-          ${pathPortionInSourceGraphs} ?o .
-      }
-
-      ${graphsFilterG}
-    `;
-  }
-  return pathInAndOutOfSourceGraphs;
 }

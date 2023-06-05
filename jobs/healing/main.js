@@ -59,13 +59,13 @@ async function getTaskUri(jobOperationUri, taskOperationUri, statusUri) {
 
     SELECT DISTINCT ?task WHERE {
       GRAPH ?g {
-          ?job a ${sparqlEscapeUri(JOB_TYPE)};
-            task:operation ${sparqlEscapeUri(jobOperationUri)}.
+        ?job a ${sparqlEscapeUri(JOB_TYPE)};
+          task:operation ${sparqlEscapeUri(jobOperationUri)}.
 
-          ?task dct:isPartOf ?job;
-            a ${sparqlEscapeUri(TASK_TYPE)};
-            task:operation ${sparqlEscapeUri(taskOperationUri)};
-            adms:status ${sparqlEscapeUri(statusUri)}.
+        ?task dct:isPartOf ?job;
+          a ${sparqlEscapeUri(TASK_TYPE)};
+          task:operation ${sparqlEscapeUri(taskOperationUri)};
+          adms:status ${sparqlEscapeUri(statusUri)}.
       }
     }
   `;
