@@ -8,9 +8,9 @@ import {
   hasInitialSyncRun,
   isBlockingJobActive,
   isInitialSyncOrHealingJobScheduled,
-} from "./jobs/utils";
+  storeError,
+} from "./lib/utils";
 import { ProcessingQueue } from "./lib/processing-queue";
-import { storeError } from "./lib/utils";
 import { isSharepointConfigValid, getListInfo } from "./lib/sharepoint-helpers";
 
 app.use(
@@ -28,12 +28,12 @@ const processingQueue = new ProcessingQueue();
 isSharepointConfigValid(getListInfo);
 
 // The services takes a while to start and can miss the background job initiating the initial sync
-isInitialSyncOrHealingJobScheduled().then(result => {
+isInitialSyncOrHealingJobScheduled().then((result) => {
   if (result) {
-    console.log('Executing initial sync or healing job created before startup');
+    console.log("Executing initial sync or healing job created before startup");
     startInitialSyncOrHealing();
   } else {
-    console.log('No initial sync or healing job pending');
+    console.log("No initial sync or healing job pending");
   }
 });
 
