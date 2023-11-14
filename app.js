@@ -48,7 +48,7 @@ app.post("/delta", async function (req, res) {
     if (await doesDeltaContainNewTaskToProcess(body)) {
       startInitialSyncOrHealing();
     } else if (await isBlockingJobActive()) {
-      // Durig the healing and the inital sync, we want as few as much moving parts,
+      // Durig the healing and the inital sync, we want as few as possible moving parts,
       // If a delta comes in while the healing process is busy, this might yield inconsistent/difficult to troubleshoot results.
       // Suppose:
       //  - healing produces statement S1 at t1: "REMOVE <foo> <bar> <baz>."

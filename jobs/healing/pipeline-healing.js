@@ -6,19 +6,14 @@ import {
   USE_VIRTUOSO_FOR_EXPENSIVE_SELECTS,
   VIRTUOSO_ENDPOINT,
   SHAREPOINT_UUID_FIELD_NAME,
-  PREFIXES,
 } from "../../env-config";
 import {
   getAuthenticated,
   querySharepointList,
   spGetWithRetry,
-  spUpdateWithRetry,
-  spSetReadOnlyWithRetry,
 } from "../../lib/sharepoint-helpers";
 import {
-  constructGraphsFilter,
   constructPredicatePath,
-  constructPathInAndOutOfSourceGraphs,
 } from "../../lib/utils";
 
 /*
@@ -38,63 +33,6 @@ export async function runHealingTask() {
     const started = new Date();
     console.log(`starting at ${started}`);
 
-    // FIRST STEP - BEGINNING
-    // Uploading fixed ID based on initial matching field when fixed ID not found
-    const initialMatchingObject = CONFIG.objects.find((object) =>
-      object.mappings.find((mapping) => mapping.isInitialMatchingMapping)
-    );
-    const initialMatchingMapping = initialMatchingObject.mappings.find(
-      (mapping) => mapping.isInitialMatchingMapping
-    );
-
-    // 1. Get all intiial matching info in OP
-    const initialMatchingInfo = await getInitialMatchingInfo(
-      initialMatchingObject.pathToMatchingUuid,
-      initialMatchingMapping.op
-    );
-
-    // 2. Get all lines where matching info is missing in Sharepoint
-    const missingMatchingUuidInSharepoint = await spGetWithRetry(sp, {
-      fields: initialMatchingMapping.sl,
-      where: `${SHAREPOINT_UUID_FIELD_NAME} = ''`,
-    });
-
-    // 3. Try to get matching field info in OP
-    const matchingRowsToSync = [];
-
-    missingMatchingUuidInSharepoint.forEach((res) => {
-      const matchingValue = res.getAttribute(initialMatchingMapping.sl);
-      const opMatch = initialMatchingInfo.find(
-        (info) => info.matchingValue == matchingValue
-      );
-
-      if (opMatch) {
-        matchingRowsToSync.push({
-          matchingValue,
-          matchingUuid: opMatch.matchingUuid,
-        });
-      }
-    });
-
-    // 4. Insert the matching uuid when a match has been found
-    console.log(
-      `Syncing ${matchingRowsToSync.length} matching values to the sharepoint list (this might take a while)...`
-    );
-    for (const row of matchingRowsToSync) {
-      const insertionInstructions = {};
-      insertionInstructions[SHAREPOINT_UUID_FIELD_NAME] = row.matchingUuid;
-
-      await spSetReadOnlyWithRetry(sp, SHAREPOINT_UUID_FIELD_NAME, false);
-      await spUpdateWithRetry(sp, insertionInstructions, {
-        where: `${initialMatchingMapping.sl} = '${row.matchingValue}'`,
-      });
-      await spSetReadOnlyWithRetry(sp, SHAREPOINT_UUID_FIELD_NAME, true);
-    }
-    console.log("...Done");
-
-    // FIRST STEP - END
-
-    // SECOND STEP - BEGINNING
     // Updating data of the sharepoint list, mapping on fixed ID
 
     let accumulatedDiffs = { inserts: [], deletes: [] };
@@ -180,46 +118,6 @@ export async function runHealingTask() {
   }
 }
 
-/**
- * Queries the triplestore to get all the fixed ID as well as initial mapping values
- *
- * @param {String} pathToMatchingUuid
- * @param {Array} predicatePathArray
- * @returns matching fixed IDs and initial mapping values
- */
-async function getInitialMatchingInfo(pathToMatchingUuid, predicatePathArray) {
-  // We limit the source graphs to avoid also including producers graphs that could not be up-to-date,
-  // depending on when the healing runs, as well as other graphs is need be
-  const graphsFilter = constructGraphsFilter("graph");
-  const predicatePath = constructPredicatePath(predicatePathArray);
-
-  const queryString = `
-    ${PREFIXES}
-
-    SELECT DISTINCT ?matchingUuid ?matchingValue WHERE {
-      ${pathToMatchingUuid}
-
-      GRAPH ?graph {
-        ?s ${predicatePath} ?matchingValue .
-      }
-
-      ${graphsFilter}
-    }
-  `;
-
-  const result = await query(queryString);
-  if (result.results.bindings.length) {
-    return result.results.bindings.map((binding) => {
-      return {
-        matchingUuid: binding.matchingUuid.value,
-        matchingValue: binding.matchingValue.value,
-      };
-    });
-  } else {
-    return [];
-  }
-}
-
 /*
  * Gets the triples for a property, which are considered 'Ground Truth'
  */
@@ -244,24 +142,19 @@ async function getSourceData(configObject) {
 async function getScopedSourceTriples(configObject, mapping) {
   // We limit the source graphs to avoid also including producers graphs that could not be up-to-date,
   // depending on when the healing runs, as well as other graphs is need be
-  const graphsFilterG = constructGraphsFilter("g");
-  const graphsFilterH = constructGraphsFilter("h");
-  const pathInAndOutOfSourceGraphs = constructPathInAndOutOfSourceGraphs(
-    mapping.op,
-    "h"
-  );
+  const fromSourceGraphsStatements = CONFIG.sourceGraphs.map((sourceGraph) =>
+    `FROM ${sparqlEscapeUri(sourceGraph)}`
+  ).join('\n');
 
   // We highly rely on the configuration for this. The variables ?s and ?matchingUuid are used in the config
   // and reused in the query.
   const selectFromDatabase = `
-    SELECT DISTINCT ?s ?o ?matchingUuid WHERE {
-      GRAPH ?g {
-        ?s a ${sparqlEscapeUri(configObject.type)} .
-      }
-      ${graphsFilterG}
+    SELECT DISTINCT ?s ?o ?matchingUuid
+    ${fromSourceGraphsStatements}
+    WHERE {
+      ?s a ${sparqlEscapeUri(configObject.type)} .
 
-      ${pathInAndOutOfSourceGraphs}
-      ${graphsFilterH}
+      ?s ${constructPredicatePath(mapping.op)} ?o .
 
       ${configObject.pathToMatchingUuid}
     }
