@@ -5,7 +5,7 @@ import {
   MU_AUTH_ENDPOINT,
   USE_VIRTUOSO_FOR_EXPENSIVE_SELECTS,
   VIRTUOSO_ENDPOINT,
-  SHAREPOINT_UUID_FIELD_NAME,
+  SHAREPOINT_URI_FIELD_NAME,
 } from "../../env-config";
 import {
   getAuthenticated,
@@ -16,17 +16,6 @@ import {
   constructPredicatePath,
 } from "../../lib/utils";
 
-/*
-  When initial syncing or healing, we want to match data already present in the sharepoint list to
-  data from our database. But in the case of initial syncing or if admin units are manually added
-  afterwards (for ex. when onboarding new types of admin units), the matchingUuid we normally use
-  is not yet uploaded to the list. We need an other way of doing the matching in the meantime.
-  To do this, we'll agree on a matching field to map data of the list to data of our db and
-  to upload the matching uuid used in the configuration. It's this uuid that will then be used
-  to sync data.
-  We do it in two steps because the initial mapping field could afterwards be updated in OP and
-  the matching would be broken. It's why we prefer relying on a fixed ID value as soon as we have it uploaded.
-*/
 export async function runHealingTask() {
   try {
     const sp = getAuthenticated();
@@ -78,8 +67,8 @@ export async function runHealingTask() {
       // (because we have a different value locally), no need to insert an empty value over an already empty field
       if (del.originalResult.getAttribute(del.originalMapping.sl)) {
         const queryParam = {
-          matchingUuid: del.originalResult.getAttribute(
-            SHAREPOINT_UUID_FIELD_NAME
+          matchingUri: del.originalResult.getAttribute(
+            SHAREPOINT_URI_FIELD_NAME
           ),
           value: "",
           sharepointField: del.originalMapping.sl,
@@ -97,7 +86,7 @@ export async function runHealingTask() {
     let insertsQueryParams = [];
     for (const insert of accumulatedDiffs.inserts) {
       const queryParam = {
-        matchingUuid: insert.originalTriple.matchingUuid.value,
+        matchingUri: insert.originalTriple.matchingUri.value,
         value: insert.originalTriple.o.value,
         sharepointField: insert.originalMapping.sl,
       };
@@ -146,17 +135,17 @@ async function getScopedSourceTriples(configObject, mapping) {
     `FROM ${sparqlEscapeUri(sourceGraph)}`
   ).join('\n');
 
-  // We highly rely on the configuration for this. The variables ?s and ?matchingUuid are used in the config
+  // We highly rely on the configuration for this. The variables ?s and ?matchingUri are used in the config
   // and reused in the query.
   const selectFromDatabase = `
-    SELECT DISTINCT ?s ?o ?matchingUuid
+    SELECT DISTINCT ?s ?o ?matchingUri
     ${fromSourceGraphsStatements}
     WHERE {
       ?s a ${sparqlEscapeUri(configObject.type)} .
 
       ?s ${constructPredicatePath(mapping.op)} ?o .
 
-      ${configObject.pathToMatchingUuid}
+      ${configObject.pathToMatchingUri}
     }
   `;
 
@@ -184,7 +173,7 @@ async function getSharepointData(configObject, sp) {
 
   for (const mapping of configObject.mappings) {
     const scopedSharepointData = await spGetWithRetry(sp, {
-      fields: `${SHAREPOINT_UUID_FIELD_NAME},${mapping.sl}`,
+      fields: `${SHAREPOINT_URI_FIELD_NAME},${mapping.sl}`,
     });
 
     const formattedScopedSharepointData = reformatSharepointData(
@@ -204,7 +193,7 @@ async function getSharepointData(configObject, sp) {
 
 /**
  * Makes a diff of two datasets. Both datasets are formatted in a way that allows us to compare them easily:
- * `sharepointFieldName matchingUuidValue fieldValue`
+ * `sharepointFieldName matchingUriValue fieldValue`
  * @param {Array} source Triples from our database
  * @param {Array} target Data from the sharepoint
  * @returns Set of deletes and inserts to execute on the sharepoint list to sync it with our triplestore
@@ -255,7 +244,7 @@ function reformatQueryResult(result, mapping) {
 }
 
 function stringifyTriplestoreData(t, mapping) {
-  return `${mapping.sl} ${t.matchingUuid.value} ${t.o.value}`;
+  return `${mapping.sl} ${t.matchingUri.value} ${t.o.value}`;
 }
 
 function reformatSharepointData(result, mapping) {
@@ -270,6 +259,6 @@ function reformatSharepointData(result, mapping) {
 
 function stringifySharepointData(res, mapping) {
   return `${mapping.sl} ${res.getAttribute(
-    SHAREPOINT_UUID_FIELD_NAME
+    SHAREPOINT_URI_FIELD_NAME
   )} ${res.getAttribute(mapping.sl)}`;
 }
