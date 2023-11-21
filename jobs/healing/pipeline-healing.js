@@ -5,7 +5,6 @@ import {
   MU_AUTH_ENDPOINT,
   USE_VIRTUOSO_FOR_EXPENSIVE_SELECTS,
   VIRTUOSO_ENDPOINT,
-  SHAREPOINT_URI_FIELD_NAME,
 } from "../../env-config";
 import {
   getAuthenticated,
@@ -14,7 +13,10 @@ import {
 } from "../../lib/sharepoint-helpers";
 import {
   constructPredicatePath,
+  getMatchingFieldName
 } from "../../lib/utils";
+
+const MATCHING_FIELD_NAME = getMatchingFieldName();
 
 export async function runHealingTask() {
   try {
@@ -68,7 +70,7 @@ export async function runHealingTask() {
       if (del.originalResult.getAttribute(del.originalMapping.sl)) {
         const queryParam = {
           matchingUri: del.originalResult.getAttribute(
-            SHAREPOINT_URI_FIELD_NAME
+            MATCHING_FIELD_NAME
           ),
           value: "",
           sharepointField: del.originalMapping.sl,
@@ -173,7 +175,7 @@ async function getSharepointData(configObject, sp) {
 
   for (const mapping of configObject.mappings) {
     const scopedSharepointData = await spGetWithRetry(sp, {
-      fields: `${SHAREPOINT_URI_FIELD_NAME},${mapping.sl}`,
+      fields: `${MATCHING_FIELD_NAME},${mapping.sl}`,
     });
 
     const formattedScopedSharepointData = reformatSharepointData(
@@ -259,6 +261,6 @@ function reformatSharepointData(result, mapping) {
 
 function stringifySharepointData(res, mapping) {
   return `${mapping.sl} ${res.getAttribute(
-    SHAREPOINT_URI_FIELD_NAME
+    MATCHING_FIELD_NAME
   )} ${res.getAttribute(mapping.sl)}`;
 }

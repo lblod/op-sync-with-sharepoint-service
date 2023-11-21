@@ -49,7 +49,6 @@ This service relies on deltas to get triggered, and jobs are initiated by the de
       PASSWORD: '<pwd>'
       SITE: '<site>'
       LIST: '<list>'
-      SHAREPOINT_URI_FIELD_NAME: 'fieldName'
     links:
       - db:database
     volumes:
@@ -162,7 +161,6 @@ As new jobs are added, the jobs controller also needs to be configured
 | PASSWORD | Password used to login to the sharepoint list | | X |
 | SITE | Uri of the sharepoint site where the list is stored | | X |
 | LIST | Name of the list to update | | X |
-| SHAREPOINT_URI_FIELD_NAME | Name of the sharepoint list field where we store the URI of the administrative unit, used to map local data to sharepoint data | | X |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -179,6 +177,7 @@ This configuration file, mounted in the docker-compose snippet, indicates how to
   - `mappings`: the different properties of the resource that we want to map
     - `op`: the URI of the property
     - `sl`: the (technical and hidden) name of the field in the sharepoint list
+    - `isMatchingField`: true if this is the field that should be used to map OP data to the lists' rows
   - `pathToMatchingUri`: the path from the resource to the URI used to match triplestore resources to
 
 `/config/sharepoint/sync/example/config.json`
@@ -196,8 +195,9 @@ This configuration file, mounted in the docker-compose snippet, indicates how to
           "sl": "Title",
         },
         {
-          "op": ["http://www.w3.org/ns/regorg#orgStatus", "http://www.w3.org/2004/02/skos/core#prefLabel"],
-          "sl": "Organisatiestatus"
+          "op": ["http://mu.semte.ch/vocabularies/core/uuid", "^http://mu.semte.ch/vocabularies/core/uuid"],
+          "sl": "OP_Uri",
+          "isMatchingField": "true"
         }
       ],
       "pathToMatchingUri": "?s a <http://data.vlaanderen.be/ns/besluit#Bestuurseenheid> . BIND (?s as ?matchingUri)"
