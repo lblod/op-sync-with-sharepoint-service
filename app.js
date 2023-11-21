@@ -11,7 +11,7 @@ import {
   storeError,
 } from "./lib/utils";
 import { ProcessingQueue } from "./lib/processing-queue";
-import { isSharepointConfigValid, getListInfo } from "./lib/sharepoint-helpers";
+import { isSharepointConfigValid, getListInfo, flushData } from "./lib/sharepoint-helpers";
 
 app.use(
   bodyParser.json({
@@ -89,5 +89,31 @@ function startInitialSyncOrHealing() {
     return await executeHealingTask();
   });
 }
+
+// /!\ FLUSHES THE WHOLE LIST CONTENT /!\
+// This is meant for developping purposes
+app.post('/flush', async function( _, res ){
+  const sleep = 30;
+  const msg = `
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n
+    This call will flush the sharepoint list's content
+    \n
+    You have ${sleep} seconds to exit and stop the service if this call was not your intention. \n
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n
+  `;
+  console.warn(msg);
+  res.send({ msg });
+
+  await new Promise(r => setTimeout(r, 30*1000));
+  console.log(`Starting flush, this may take a few seconds...`);
+  try {
+    await flushData();
+    console.log('Flush successful');
+  }
+  catch(e) {
+    console.error('Something went wrong during flush');
+    console.error(e);
+  }
+});
 
 app.use(errorHandler);
