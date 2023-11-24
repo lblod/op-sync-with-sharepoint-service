@@ -3,7 +3,7 @@
 
 <br />
 <div align="center">
-  <h1 align="center">op-sync-with-sharepoint-service/h1>
+  <h1 align="center">op-sync-with-sharepoint-service</h1>
   <p align="center">
     Service that syncs data from OP to defined read-only Sharepoint lists.
     <br />
@@ -23,7 +23,7 @@ data to be available at the responsability of the consumer. Because of that spec
 We have three different sync ways:
 - Initial sync: happens only once, when the sync is setup. It does a big diff to see what data needs to be deleted or inserted in the list. This job is created by an instance of [delta-producer-background-jobs-initiator](https://github.com/lblod/delta-producer-background-jobs-initiator)
 - Healing: on a regular basis, checks the diff between the list and our database and correct it if it finds errors. [delta-producer-background-jobs-initiator](https://github.com/lblod/delta-producer-background-jobs-initiator)
-- Delta sync: everytime there is a change in the database, we receive a delta message from the [deltanotifier](https://github.com/mu-semtech/delta-notifier)
+- Delta sync: every time there is a change in the database, we receive a delta message from the [deltanotifier](https://github.com/mu-semtech/delta-notifier)
 
 ### 📦 Related services
 
@@ -54,7 +54,7 @@ This service relies on deltas to get triggered, and jobs are initiated by the de
     volumes:
       - ./config/sharepoint/sync/organizations/:/config/
     labels:
-	  - "logging=true"
+      - "logging=true"
     restart: always
     logging: *default-logging
 ```
@@ -154,7 +154,7 @@ As new jobs are added, the jobs controller also needs to be configured
 
 | ENV  | description | default | required |
 |---|---|---|---|
-| INITIAL_SYNC_JOB_OPERATION | URI of the job operation for the intial sync | | X |
+| INITIAL_SYNC_JOB_OPERATION | URI of the job operation for the initial sync | | X |
 | HEALING_JOB_OPERATION | URI of the job operation for the healing | | X |
 | USE_VIRTUOSO_FOR_EXPENSIVE_SELECTS | Bypass mu-auth for selects that are too heavy  | `false` | |
 | USERNAME | Username used to login to the sharepoint list | | X |
