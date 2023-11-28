@@ -126,8 +126,8 @@ async function getSourceData(configObject) {
  * Gets the source data for a property for predefined graphs
  */
 async function getScopedSourceTriples(configObject, mapping) {
-  // We limit the source graphs to avoid also including producers graphs that could not be up-to-date,
-  // depending on when the healing runs, as well as other graphs is need be
+  // We limit the source graphs to avoid including graphs such as producers graphs that could not be up-to-date,
+  // depending on when the healing runs, as well as landing zone graphs that can also contain data not-to-be synced.
   const fromSourceGraphsStatements = CONFIG.sourceGraphs
     .map((sourceGraph) => `FROM ${sparqlEscapeUri(sourceGraph)}`)
     .join("\n");
