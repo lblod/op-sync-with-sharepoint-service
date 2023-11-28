@@ -11,10 +11,7 @@ import {
   querySharepointList,
   spGetWithRetry,
 } from "../../lib/sharepoint-helpers";
-import {
-  constructPredicatePath,
-  getMatchingFieldName
-} from "../../lib/utils";
+import { constructPredicatePath, getMatchingFieldName } from "../../lib/utils";
 
 const MATCHING_FIELD_NAME = getMatchingFieldName();
 
@@ -32,14 +29,14 @@ export async function runHealingTask() {
     // The triples to push to heal in sharepoint should be equal to
     // - whose ?p match the properties defined in the CONFIG AND
     // - who match any of the configured types AND
-    // - (should NOT reside exclusively in the sharepoint list) XOR (reside in a set of predfined graphs)
+    // - (should NOT reside exclusively in the sharepoint list) XOR (reside in a set of predefined graphs)
     //
-    // In the first step, we build this set (say set A), looking for triples matching the above conditions for a specic ?p.
+    // In the first step, we build this set (say set A), looking for triples matching the above conditions for a specific ?p.
     // (For performance reasons, we split it up.)
     // In the second step we fetch all triples matching ?p in the sharepoint list. (set B)
     //
-    // With this result, we have a complete picture for a specific ?p to caclulating the difference.
-    // The addtions are A\B, and removals are B\A
+    // With this result, we have a complete picture for a specific ?p to calculating the difference.
+    // The additions are A\B, and removals are B\A
     for (const configObject of CONFIG.objects) {
       // 1. Get source data following mapping config
       const sourceData = await getSourceData(configObject);
@@ -69,9 +66,7 @@ export async function runHealingTask() {
       // (because we have a different value locally), no need to insert an empty value over an already empty field
       if (del.originalResult.getAttribute(del.originalMapping.sl)) {
         const queryParam = {
-          matchingUri: del.originalResult.getAttribute(
-            MATCHING_FIELD_NAME
-          ),
+          matchingUri: del.originalResult.getAttribute(MATCHING_FIELD_NAME),
           value: "",
           sharepointField: del.originalMapping.sl,
         };
@@ -117,7 +112,7 @@ async function getSourceData(configObject) {
   for (const mapping of configObject.mappings) {
     const scopedSourceData = await getScopedSourceTriples(
       configObject,
-      mapping
+      mapping,
     );
 
     const diffs = diffTriplesData(scopedSourceData, sourceData);
@@ -133,9 +128,9 @@ async function getSourceData(configObject) {
 async function getScopedSourceTriples(configObject, mapping) {
   // We limit the source graphs to avoid also including producers graphs that could not be up-to-date,
   // depending on when the healing runs, as well as other graphs is need be
-  const fromSourceGraphsStatements = CONFIG.sourceGraphs.map((sourceGraph) =>
-    `FROM ${sparqlEscapeUri(sourceGraph)}`
-  ).join('\n');
+  const fromSourceGraphsStatements = CONFIG.sourceGraphs
+    .map((sourceGraph) => `FROM ${sparqlEscapeUri(sourceGraph)}`)
+    .join("\n");
 
   // We highly rely on the configuration for this. The variables ?s and ?matchingUri are used in the config
   // and reused in the query.
@@ -151,7 +146,7 @@ async function getScopedSourceTriples(configObject, mapping) {
     }
   `;
 
-  // Note: this might explose memory, but now, a paginated fetch is extremely slow. (because sorting)
+  // Note: this might explode memory, but now, a paginated fetch is extremely slow. (because sorting)
   const endpoint = USE_VIRTUOSO_FOR_EXPENSIVE_SELECTS
     ? VIRTUOSO_ENDPOINT
     : MU_AUTH_ENDPOINT;
@@ -161,7 +156,7 @@ async function getScopedSourceTriples(configObject, mapping) {
   const result = await query(
     selectFromDatabase,
     {},
-    { sparqlEndpoint: endpoint, mayRetry: true }
+    { sparqlEndpoint: endpoint, mayRetry: true },
   );
 
   return reformatQueryResult(result, mapping);
@@ -180,11 +175,11 @@ async function getSharepointData(configObject, sp) {
 
     const formattedScopedSharepointData = reformatSharepointData(
       scopedSharepointData,
-      mapping
+      mapping,
     );
     const diffs = diffTriplesData(
       formattedScopedSharepointData,
-      sharepointData
+      sharepointData,
     );
 
     sharepointData = [...sharepointData, ...diffs.inserts];
@@ -216,10 +211,10 @@ function diffTriplesData(source, target) {
   }, {});
 
   diff.inserts = source.filter(
-    (data) => !targetHash[data.stringifiedSharepointData]
+    (data) => !targetHash[data.stringifiedSharepointData],
   );
   diff.deletes = target.filter(
-    (data) => !sourceHash[data.stringifiedSharepointData]
+    (data) => !sourceHash[data.stringifiedSharepointData],
   );
 
   return diff;
@@ -261,6 +256,6 @@ function reformatSharepointData(result, mapping) {
 
 function stringifySharepointData(res, mapping) {
   return `${mapping.sl} ${res.getAttribute(
-    MATCHING_FIELD_NAME
+    MATCHING_FIELD_NAME,
   )} ${res.getAttribute(mapping.sl)}`;
 }

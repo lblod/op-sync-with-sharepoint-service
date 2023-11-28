@@ -11,7 +11,11 @@ import {
   storeError,
 } from "./lib/utils";
 import { ProcessingQueue } from "./lib/processing-queue";
-import { isSharepointConfigValid, getListInfo, flushData } from "./lib/sharepoint-helpers";
+import {
+  isSharepointConfigValid,
+  getListInfo,
+  flushData,
+} from "./lib/sharepoint-helpers";
 
 app.use(
   bodyParser.json({
@@ -19,7 +23,7 @@ app.use(
       return /^application\/json/.test(req.get("content-type"));
     },
     limit: "500mb",
-  })
+  }),
 );
 
 const processingQueue = new ProcessingQueue();
@@ -48,7 +52,7 @@ app.post("/delta", async function (req, res) {
     if (await doesDeltaContainNewTaskToProcess(body)) {
       startInitialSyncOrHealing();
     } else if (await isBlockingJobActive()) {
-      // Durig the healing and the inital sync, we want as few as possible moving parts,
+      // During the healing and the initial sync, we want as few as possible moving parts,
       // If a delta comes in while the healing process is busy, this might yield inconsistent/difficult to troubleshoot results.
       // Suppose:
       //  - healing produces statement S1 at t1: "REMOVE <foo> <bar> <baz>."
@@ -79,10 +83,10 @@ function startInitialSyncOrHealing() {
   // From here on, the database is source of truth and the incoming delta was just a signal to start
   console.log(`Healing process (or initial sync) will start.`);
   console.log(
-    `There were still ${processingQueue.queue.length} jobs in the queue`
+    `There were still ${processingQueue.queue.length} jobs in the queue`,
   );
   console.log(
-    `And the queue executing state is on ${processingQueue.executing}.`
+    `And the queue executing state is on ${processingQueue.executing}.`,
   );
   processingQueue.queue = []; // Flush all remaining jobs, we don't want moving parts cf. next comment
   processingQueue.addJob(async () => {
@@ -91,8 +95,8 @@ function startInitialSyncOrHealing() {
 }
 
 // /!\ FLUSHES THE WHOLE LIST CONTENT /!\
-// This is meant for developping purposes
-app.post('/flush', async function( _, res ){
+// This is meant for developing purposes
+app.post("/flush", async function (_, res) {
   const sleep = 30;
   const msg = `
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n
@@ -104,14 +108,13 @@ app.post('/flush', async function( _, res ){
   console.warn(msg);
   res.send({ msg });
 
-  await new Promise(r => setTimeout(r, 30*1000));
+  await new Promise((r) => setTimeout(r, 30 * 1000));
   console.log(`Starting flush, this may take a few seconds...`);
   try {
     await flushData();
-    console.log('Flush successful');
-  }
-  catch(e) {
-    console.error('Something went wrong during flush');
+    console.log("Flush successful");
+  } catch (e) {
+    console.error("Something went wrong during flush");
     console.error(e);
   }
 });
