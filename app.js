@@ -1,44 +1,122 @@
-import { app, errorHandler } from 'mu';
-import bodyParser from 'body-parser';
-import flatten from 'lodash.flatten';
-import { updateSharepointList } from './lib/sharepoint-helpers';
+import bodyParser from "body-parser";
+import { app, errorHandler } from "mu";
+import { LOG_INCOMING_DELTA, WAIT_FOR_INITIAL_SYNC } from "./env-config";
+import { executeHealingTask } from "./jobs/healing/main";
+import { executeSyncingTask } from "./jobs/syncing/main";
+import {
+  doesDeltaContainNewTaskToProcess,
+  hasInitialSyncRun,
+  isBlockingJobActive,
+  isInitialSyncOrHealingJobScheduled,
+  storeError,
+} from "./lib/utils";
+import { ProcessingQueue } from "./lib/processing-queue";
+import {
+  isSharepointConfigValid,
+  getListInfo,
+  flushData,
+} from "./lib/sharepoint-helpers";
 
-// TODO - Add a retry mechanism on failed requests
+app.use(
+  bodyParser.json({
+    type: function (req) {
+      return /^application\/json/.test(req.get("content-type"));
+    },
+    limit: "500mb",
+  }),
+);
 
-// TODO - Log an error + send an email each time a syncing fails (after the retries)
-// See https://github.com/lblod/delta-consumer-file-sync-submissions/blob/master/lib/error.js
+const processingQueue = new ProcessingQueue();
 
-// TODO - Add a nighly cron job that heals the data in case something went wrong with the deltas
-// It will get all the persons / organizations, flush their values in the list (only those that we'll replace)
-// and push their current state from the publication graph
+// Checks if sharepoint config is valid on startup (aka if we can log in and read a list)
+isSharepointConfigValid(getListInfo);
 
-app.use(bodyParser.json({
-  type: function (req) { return /^application\/json/.test(req.get('content-type')); },
-  limit: '500mb'
-}));
-
-app.get('/', function (req, res) {
-  res.send('Hello from sync-with-sharepoint ! :)');
+// The services takes a while to start and can miss the background job initiating the initial sync
+isInitialSyncOrHealingJobScheduled().then((result) => {
+  if (result) {
+    console.log("Executing initial sync or healing job created before startup");
+    startInitialSyncOrHealing();
+  } else {
+    console.log("No initial sync or healing job pending");
+  }
 });
 
-app.post('/delta', async function (req, res) {
+app.post("/delta", async function (req, res) {
   try {
-    const delta = req.body;
+    const body = req.body;
 
-    const deletes = flatten(delta.map(changeSet => changeSet.deletes));
-    const inserts = flatten(delta.map(changeSet => changeSet.inserts));
-
-    if (deletes.length || inserts.length) {
-      updateSharepointList(deletes, inserts);
-    } else {
-      console.log("No deletes or inserts in the deltas, skipping.");
+    if (LOG_INCOMING_DELTA) {
+      console.log(`Receiving delta ${JSON.stringify(body)}`);
     }
-  }
-  catch (e) {
-    console.error(`General error processing delta notification ${e}`);
-  }
 
-  res.status(202).send();
+    if (await doesDeltaContainNewTaskToProcess(body)) {
+      startInitialSyncOrHealing();
+    } else if (await isBlockingJobActive()) {
+      // During the healing and the initial sync, we want as few as possible moving parts,
+      // If a delta comes in while the healing process is busy, this might yield inconsistent/difficult to troubleshoot results.
+      // Suppose:
+      //  - healing produces statement S1 at t1: "REMOVE <foo> <bar> <baz>."
+      //  - random service produces statement S2 at t2: "ADD <foo> <bar> <baz>."
+      //  - Suppose S1 and S2 are about the same resource and S2 gets processed before S2 (Because, e.g. healing takes more time)
+      //  This would result in out of sync data between our triplestore and the sharepoint list, which affects the clients information too.
+      //  In our case, this would be fixed by the next healing though.
+      console.info("Blocking jobs are active, skipping incoming deltas");
+    } else if (WAIT_FOR_INITIAL_SYNC && !(await hasInitialSyncRun())) {
+      // To sync data consistently and correctly, an initial sync needs to have run.
+      // It ensures we have a common fixed value that we can map on (triplestore/sharepoint list) for each resource that needs to be synced.
+      // Note: WAIT_FOR_INITIAL_SYNC is mainly meant for debugging purposes, defaults to true
+      console.info("Initial sync did not run yet, skipping incoming deltas");
+    } else {
+      // Normal operation mode: syncing incoming data with configured sharepoint list
+      // Put in a queue, because we want to make sure to have them ordered.
+      processingQueue.addJob(async () => await executeSyncingTask(body));
+    }
+    res.status(202).send();
+  } catch (error) {
+    console.error(error);
+    await storeError(error);
+    res.status(500).send();
+  }
+});
+
+function startInitialSyncOrHealing() {
+  // From here on, the database is source of truth and the incoming delta was just a signal to start
+  console.log(`Healing process (or initial sync) will start.`);
+  console.log(
+    `There were still ${processingQueue.queue.length} jobs in the queue`,
+  );
+  console.log(
+    `And the queue executing state is on ${processingQueue.executing}.`,
+  );
+  processingQueue.queue = []; // Flush all remaining jobs, we don't want moving parts cf. next comment
+  processingQueue.addJob(async () => {
+    return await executeHealingTask();
+  });
+}
+
+// /!\ FLUSHES THE WHOLE LIST CONTENT /!\
+// This is meant for developing purposes
+app.post("/flush", async function (_, res) {
+  const sleep = 30;
+  const msg = `
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n
+    This call will flush the sharepoint list's content
+    \n
+    You have ${sleep} seconds to exit and stop the service if this call was not your intention. \n
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n
+  `;
+  console.warn(msg);
+  res.send({ msg });
+
+  await new Promise((r) => setTimeout(r, 30 * 1000));
+  console.log(`Starting flush, this may take a few seconds...`);
+  try {
+    await flushData();
+    console.log("Flush successful");
+  } catch (e) {
+    console.error("Something went wrong during flush");
+    console.error(e);
+  }
 });
 
 app.use(errorHandler);
